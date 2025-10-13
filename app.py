@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from chart_generator import generate_all_charts  # This will be created from your notebook logic
 from summary_generator import generate_summary_and_recommendations
-from utilities.openai_observer import get_observation
 import io
 
 
