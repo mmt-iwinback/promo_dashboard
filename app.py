@@ -2,14 +2,39 @@ import streamlit as st
 import pandas as pd
 from chart_generator import generate_all_charts  # This will be created from your notebook logic
 from summary_generator import generate_summary_and_recommendations
-import io
-import plotly.io as pio
+import os
 import pathlib
+import tempfile
+import streamlit as st
+import plotly.io as pio
+import io
 
-# Get the path to the Chrome executable
-chrome_path: pathlib.Path = pio.get_chrome()
+@st.cache_resource(show_spinner=False)
+def ensure_plotly_chrome() -> str:
+    # 1) Prefer an existing Chrome/Chromium if the platform provides it
+    candidates = [
+        os.environ.get("PLOTLY_CHROME_PATH"),
+        os.environ.get("GOOGLE_CHROME_BIN"),
+        "/usr/bin/google-chrome",
+        "/usr/bin/google-chrome-stable",
+        "/usr/bin/chromium",
+        "/usr/bin/chromium-browser",
+    ]
+    for c in candidates:
+        if c and pathlib.Path(c).exists():
+            pio.kaleido.scope.chromium_executable = c
+            return c
 
-print(f"Path to Chrome executable: {chrome_path}")
+    # 2) Otherwise, download to a writable dir (Streamlit Cloud: /tmp is writable)
+    cache_dir = pathlib.Path(tempfile.gettempdir()) / "plotly_chrome"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    chrome_path = pio.get_chrome(cache_dir)  # <- critical: pass a writable path
+    pio.kaleido.scope.chromium_executable = str(chrome_path)
+    return str(chrome_path)
+
+# Call this once on startup
+_ = ensure_plotly_chrome()
 
 st.set_page_config(page_title="CRMTracker Promo Dashboard", layout="wide")
 st.title("CRMTracker Promo Dashboard")
