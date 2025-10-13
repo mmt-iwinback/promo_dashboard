@@ -3,7 +3,14 @@ import pandas as pd
 from chart_generator import generate_all_charts  # This will be created from your notebook logic
 from summary_generator import generate_summary_and_recommendations
 import io
+import plotly.io as pio
+import pathlib
 
+# Specify a custom installation path (e.g., in the current directory)
+custom_path: pathlib.Path = pathlib.Path("./chrome_install")
+chrome_path: pathlib.Path = pio.get_chrome(path=custom_path)
+
+print(f"Path to Chrome executable: {chrome_path}")
 
 st.set_page_config(page_title="CRMTracker Promo Dashboard", layout="wide")
 st.title("CRMTracker Promo Dashboard")

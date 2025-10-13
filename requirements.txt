@@ -7,4 +7,3 @@ emoji
 matplotlib
 dotenv
 kaleido
-plotly_get_chrome
