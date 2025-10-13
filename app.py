@@ -6,9 +6,8 @@ import io
 import plotly.io as pio
 import pathlib
 
-# Specify a custom installation path (e.g., in the current directory)
-custom_path: pathlib.Path = pathlib.Path("./chrome_install")
-chrome_path: pathlib.Path = pio.get_chrome(path=custom_path)
+# Get the path to the Chrome executable
+chrome_path: pathlib.Path = pio.get_chrome()
 
 print(f"Path to Chrome executable: {chrome_path}")
 
