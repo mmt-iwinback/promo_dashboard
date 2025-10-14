@@ -6,41 +6,11 @@ import os, pathlib, tempfile
 import plotly.io as pio
 import streamlit as st
 import io
+# put near the top of app.py, before any Plotly export
+import os, pathlib, tempfile
+import streamlit as st
+import plotly.io as pio
 
-@st.cache_resource(show_spinner=False)
-def ensure_plotly_chrome() -> str:
-    # Prefer existing Chrome/Chromium if available
-    candidates = [
-        os.environ.get("PLOTLY_CHROME_PATH"),
-        os.environ.get("GOOGLE_CHROME_BIN"),
-        "/usr/bin/google-chrome",
-        "/usr/bin/google-chrome-stable",
-        "/usr/bin/chromium",
-        "/usr/bin/chromium-browser",
-    ]
-    for c in candidates:
-        if c and pathlib.Path(c).exists():
-            pio.kaleido.scope.chromium_executable = c
-            return c
-
-    # Otherwise, download to a writable cache (Streamlit Cloud: /tmp is writable)
-    cache_dir = pathlib.Path(tempfile.gettempdir()) / "plotly_chrome"
-    cache_dir.mkdir(parents=True, exist_ok=True)
-
-    chrome_path = pio.get_chrome(cache_dir)  # <-- key: pass a writable path
-    pio.kaleido.scope.chromium_executable = str(chrome_path)
-    return str(chrome_path)
-
-def plotly_png_bytes(fig, *, scale=2, width=None, height=None):
-    # Try once; if anything fails, re-ensure Chrome and retry
-    try:
-        return fig.to_image(format="png", scale=scale, width=width, height=height)
-    except Exception:
-        _ = ensure_plotly_chrome()
-        return fig.to_image(format="png", scale=scale, width=width, height=height)
-
-# Initialize once
-_ = ensure_plotly_chrome()
 
 st.set_page_config(page_title="CRMTracker Promo Dashboard", layout="wide")
 st.title("CRMTracker Promo Dashboard")
@@ -132,30 +102,14 @@ if uploaded_file:
                         use_container_width=True,
                     )
                 else:
-                    # Plotly branch (initialize Chrome already done above)
                     st.plotly_chart(fig, use_container_width=True)
-
-                    try:
-                        img_bytes = plotly_png_bytes(fig, scale=2)
-                        st.download_button(
-                            label=f"Download '{name}' as PNG",
-                            data=img_bytes,
-                            file_name=f"{name}.png",
-                            mime="image/png",
-                            use_container_width=True,
-                        )
-                    except Exception as e:
-                        st.error(
-                            "PNG export failed on this platform. "
-                            "You can still use the 'Download as HTML' fallback below."
-                        )
-                        st.download_button(
-                            label=f"Download '{name}' as HTML",
-                            data=fig.to_html(include_plotlyjs="cdn"),
-                            file_name=f"{name}.html",
-                            mime="text/html",
-                            use_container_width=True,
-                        )
+                    img_bytes = fig.to_image(format="png")
+                    st.download_button(
+                        label=f"Download '{name}' as PNG",
+                        data=img_bytes,
+                        file_name=f"{name}.png",
+                        mime="image/png"
+                    )
 
                 # --- Auto AI observation for each chart ---
                 # with st.spinner("Generating AI insight..."):
