@@ -2,13 +2,7 @@ import streamlit as st
 import pandas as pd
 from chart_generator import generate_all_charts  # This will be created from your notebook logic
 from summary_generator import generate_summary_and_recommendations
-import os, pathlib, tempfile
-import plotly.io as pio
-import streamlit as st
 import io
-# put near the top of app.py, before any Plotly export
-import os, pathlib, tempfile
-import streamlit as st
 import plotly.io as pio
 
 
@@ -104,12 +98,12 @@ if uploaded_file:
                 else:
                     st.plotly_chart(fig, use_container_width=True)
                     img_bytes = fig.to_image(format="png")
-                    st.download_button(
-                        label=f"Download '{name}' as PNG",
-                        data=img_bytes,
-                        file_name=f"{name}.png",
-                        mime="image/png"
-                    )
+                    # st.download_button(
+                    #     label=f"Download '{name}' as PNG",
+                    #     data=img_bytes,
+                    #     file_name=f"{name}.png",
+                    #     mime="image/png"
+                    # )
 
                 # --- Auto AI observation for each chart ---
                 # with st.spinner("Generating AI insight..."):
