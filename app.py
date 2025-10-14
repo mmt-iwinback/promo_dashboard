@@ -96,8 +96,11 @@ if uploaded_file:
                         use_container_width=True,
                     )
                 else:
-                    st.plotly_chart(fig, use_container_width=True)
-                    img_bytes = fig.to_image(format="png")
+                    st.plotly_chart(fig,
+                                    use_container_width=True,
+                                    config={"toImageButtonOptions": {"format": "png", "filename": name, "scale": 2}}
+                    )
+                    # img_bytes = fig.to_image(format="png")
                     # st.download_button(
                     #     label=f"Download '{name}' as PNG",
                     #     data=img_bytes,
