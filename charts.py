@@ -7,7 +7,8 @@ import calendar
 from collections import Counter
 import re
 import emoji
-from utilities.helper import _prepare_offer_cols, _agg_subjects, compute_bundles
+from utilities.helper import _prepare_offer_cols, _agg_subjects, compute_bundles, preprocess_holiday_data, \
+    competitor_holiday_promos_table
 import plotly.colors as pc
 import itertools
 from matplotlib.colors import ListedColormap
@@ -16,6 +17,8 @@ from matplotlib.patches import Wedge
 from matplotlib.patches import Rectangle
 import requests
 from collections import Counter
+import colorsys
+import random
 
 
 def competitor_table(df):
@@ -23,13 +26,14 @@ def competitor_table(df):
     df = df.drop_duplicates(subset='tracking_hit_id')
 
     # Count communications per competitor
-    competitor_counts = df['competitor_name'].value_counts().reset_index()
-    competitor_counts.columns = ['Competitor Name', 'Number of Communications Received']
+    competitor_counts = df[['competitor_name', 'country']].value_counts().reset_index()
+    competitor_counts.columns = ['Competitor Name', 'Country', 'Number of Communications Received']
 
     # Add total row
     total_count = competitor_counts['Number of Communications Received'].sum()
     total_row = pd.DataFrame({
         'Competitor Name': ['TOTAL'],
+        'Country': ['ALL'],
         'Number of Communications Received': [total_count]
     })
     competitor_counts = pd.concat([competitor_counts, total_row], ignore_index=True)
@@ -91,27 +95,29 @@ def find_velocity(df, days: int):
     """
     d = (
         df.drop_duplicates(subset="tracking_hit_id")
-          .assign(
-              local_created_at=lambda x: pd.to_datetime(x["local_created_at"], errors="coerce"),
-              created_at=lambda x: pd.to_datetime(x["created_at"], errors="coerce"),
-          )
-          .dropna(subset=["local_created_at"])
+        .assign(
+            local_created_at=lambda x: pd.to_datetime(x["local_created_at"], errors="coerce"),
+            created_at=lambda x: pd.to_datetime(x["created_at"], errors="coerce"),
+        )
+        .dropna(subset=["local_created_at"])
     )
 
     grouped = (
         d.groupby(["competitor_name", "tracking_id", "lifecycle"], dropna=False)
-         .agg(
-             volume=("tracking_hit_id", "count"),
-             min_date=("local_created_at", "min"),
-             max_date=("local_created_at", "max"),
-         )
-         .reset_index()
+        .agg(
+            volume=("tracking_hit_id", "count"),
+            min_date=("local_created_at", "min"),
+            max_date=("local_created_at", "max"),
+        )
+        .reset_index()
     )
 
     grouped["min_date_str"] = grouped["min_date"].dt.strftime("%d-%b-%Y")
     grouped["max_date_str"] = grouped["max_date"].dt.strftime("%d-%b-%Y")
     grouped["active_period"] = (grouped["max_date"] - grouped["min_date"]).dt.days + 1
     grouped["weekly_velocity"] = (grouped["volume"] * 7 / max(days, 1)).round(2)
+    #grouped["weekly_velocity"] = (grouped["volume"] * 7 / grouped["active_period"].replace(0, 1)).round(2)
+
 
     final_df = (
         grouped[[
@@ -183,14 +189,14 @@ def plot_communication_velocity(data, period, days, *_):
         textinfo="value",
         marker=dict(line=dict(color="#FFFFFF", width=1)),
         hovertemplate=(
-            "Competitor: %{customdata[0]}<br>"
-            "ID: %{customdata[1]}<br>"
-            "Volume: %{customdata[2]}<br>"
-            "Period: %{customdata[3]}<br>"
-            "From: %{customdata[5]}<br>"
-            "To: %{customdata[6]}<br>"
-            "Lifecycle: %{customdata[7]}<br>"
-            "Velocity: %{customdata[4]}<extra></extra>"
+            "Competitor: %{customdata[0][0]}<br>"
+            "ID: %{customdata[0][1]}<br>"
+            "Volume: %{customdata[0][2]}<br>"
+            "Period: %{customdata[0][3]}<br>"
+            "From: %{customdata[0][5]}<br>"
+            "To: %{customdata[0][6]}<br>"
+            "Lifecycle: %{customdata[0][7]}<br>"
+            "Velocity: %{customdata[0][4]}<extra></extra>"
         ),
         direction="clockwise",
     )
@@ -212,7 +218,7 @@ def plot_communication_velocity(data, period, days, *_):
     return fig
 
 
-def frequnecy_finder(df, days: int = 30, period: str = ""):
+def frequnecy_finder(df, days: int = 30, period: str = "first"):
     """
     Runner: compute velocities, format table, and render pie; returns (fig, table_df).
     """
@@ -220,7 +226,6 @@ def frequnecy_finder(df, days: int = 30, period: str = ""):
     formatted = process_comms_velocity(table_df, period)
     fig = plot_communication_velocity(formatted, period, days, None)
     return fig, table_df
-
 
 
 def show_frequency_table(frequency_data):
@@ -242,13 +247,14 @@ def show_frequency_table(frequency_data):
                     values=list(df_table.columns),
                     fill_color='lightgray',
                     align='left',
-                    font=dict(size=15, color='black')
+                    font=dict(size=15, color='black'),
                 ),
                 cells=dict(
                     values=[df_table[col] for col in df_table.columns],
                     align='left',
+                    fill_color=[["white"] * (len(df_table['Competitor Name'].unique()))],
                     font=dict(size=12),
-                    height=28,
+                    height=35,
                 )
             )
         ]
@@ -256,6 +262,7 @@ def show_frequency_table(frequency_data):
 
     fig.update_layout(
         title='Frequency Analysis Table',
+        margin=dict(l=20, r=20, t=40, b=20),
         height=1000
     )
 
@@ -290,23 +297,22 @@ def cross_tabulation_by_competitor_lifecycle_channel(df):
                     values=header,
                     fill_color='lightgray',
                     align='left',
-                    font=dict(size=12, color='black')
+                    font=dict(size=15, color='black')
                 ),
                 cells=dict(
                     values=values,
                     align='left',
                     fill_color='white',
-                    font=dict(size=11),
+                    font=dict(size=13),
                     height=24
                 )
             )
         ]
     )
 
-
     fig.update_layout(
         title='Tracking Hits Table by Competitor, Lifecycle, and Channel',
-        height=34*len(df['competitor_name'].unique())
+        #height=34 * len(df['competitor_name'].unique())
     )
 
     return fig
@@ -681,7 +687,7 @@ def show_calendar_by_competitor(df, year=2025, competitor_col='competitor_name',
     temp_df = temp_df.rename(columns={competitor_col: 'competitor'})
 
     return plot_calendar_bars_by_competitor(
-        temp_df[['date', 'day', 'month', 'competitor']],
+        temp_df[['date', 'day', 'month', 'competitor', ]],
         year=year,
         annotate=annotate
     )
@@ -722,16 +728,29 @@ def domain_analysis(df):
     x = pivot_table.columns.tolist()  # Competitor names (columns)
     y = pivot_table.index.tolist()  # From domains (rows)
 
+    max_val = max(map(max, z))
+
     # Create heatmap
     fig = go.Figure(data=go.Heatmap(
         z=z,
         x=x,
         y=y,
-        colorscale='YlGnBu',
+        # colorscale='YlGnBu',
         hovertemplate='Competitor: %{x}<br>Domain: %{y}<br>Hits: %{z}<extra></extra>',
         text=z,
         texttemplate="%{text}",
-        showscale=True
+        # ---- CUSTOM COLORSCALE ----
+        zmin=0,
+        zmax=max_val,
+
+        # ---- SINGLE HEATMAP COLORSCALE ----
+        colorscale=[
+            [0.0, "#f0f0f0"],  # exactly 0
+            [0.00001, "#f0f0f0"],  # still 0 (tiny offset)
+            [0.000011, "#d9f0a3"],  # start of your palette
+            [1.0, "#084081"],  # end of palette
+        ],
+        showscale=True  # hide colorbar (optional)
     ))
 
     # Customize layout
@@ -785,16 +804,29 @@ def ip_analysis(df):
     x = pivot_table.columns.tolist()  # Competitor names (columns)
     y = pivot_table.index.tolist()  # From domains (rows)
 
+    max_val = max(map(max, z))
+
     # Create heatmap
     fig = go.Figure(data=go.Heatmap(
         z=z,
         x=x,
         y=y,
-        colorscale='YlGnBu',
+        # colorscale='YlGnBu',
         hovertemplate='Competitor: %{x}<br>IP Address: %{y}<br>Hits: %{z}<extra></extra>',
         text=z,
         texttemplate="%{text}",
-        showscale=True
+        # ---- CUSTOM COLORSCALE ----
+        zmin=0,
+        zmax=max_val,
+
+        # ---- SINGLE HEATMAP COLORSCALE ----
+        colorscale=[
+            [0.0, "#f0f0f0"],  # exactly 0
+            [0.00001, "#f0f0f0"],  # still 0 (tiny offset)
+            [0.000011, "#d9f0a3"],  # start of your palette
+            [1.0, "#084081"],  # end of palette
+        ],
+        showscale=True  # hide colorbar (optional)
     ))
 
     # Customize layout
@@ -877,43 +909,73 @@ def plot_ips_vs_high_volume(
 
 def average_subject_length_table(df):
     df = df.drop_duplicates(subset='tracking_hit_id')
-    # Filter out missing or null subjects
-    df = df[df['subject'].notna()].copy()
 
-    # Clean up subject if needed (remove whitespace)
+    # Filter out missing subjects
+    df = df[df['subject'].notna()].copy()
     df['subject'] = df['subject'].astype(str).str.strip()
 
     # Compute subject length
     df['subject_length'] = df['subject'].str.len()
 
-    # Group by competitor and calculate average
+    # Group by competitor
     summary = df.groupby('competitor_name')['subject_length'].mean().reset_index()
     summary['subject_length'] = summary['subject_length'].round(2)
 
     summary.columns = ['Competitor Name', 'Average Subject Length']
 
-    # Plot as table
-    fig = go.Figure(data=[
-        go.Table(
-            header=dict(
-                values=summary.columns,
-                fill_color='lightgray',
-                align='left',
-                font=dict(size=20)
-            ),
-            cells=dict(
-                values=[summary[col] for col in summary.columns],
-                align='left',
-                font=dict(size=15),
-                height=35
+    # Sort by descending subject length
+    summary = summary.sort_values('Average Subject Length', ascending=False).reset_index(drop=True)
+
+    # Build full-row color scale
+    lengths = summary['Average Subject Length'].values
+    row_colors = []
+
+    for x in lengths:
+        if x < 24:
+            c = '#ffcccc'  # red
+        elif 24 <= x < 30:
+            c = '#fff3b0'  # yellow
+        elif 30 <= x <= 36:
+            c = '#c7f7c1'  # green
+        elif 36 < x <= 42:
+            c = '#fff3b0'  # yellow again
+        else:  # x > 42
+            c = '#ffcccc'  # red
+
+        row_colors.append(c)
+
+    # For full-row coloring, repeat each color for all columns
+    fill_colors = [
+        row_colors,  # Competitor Name column
+        row_colors  # Average Subject Length column
+    ]
+
+    # Build table figure
+    fig = go.Figure(
+        data=[
+            go.Table(
+                header=dict(
+                    values=summary.columns,
+                    fill_color='lightgray',
+                    align='left',
+                    font=dict(size=20)
+                ),
+                cells=dict(
+                    values=[summary[col] for col in summary.columns],
+                    fill_color=fill_colors,
+                    align='left',
+                    font=dict(size=15),
+                    height=35
+                )
             )
-        )
-    ])
+        ]
+    )
 
     fig.update_layout(
         title='Average Subject Line Length per Competitor',
         margin=dict(t=60, l=100, r=100, b=40),
-        height=800
+        height=800,
+        template="plotly_white"
     )
 
     return fig
@@ -973,6 +1035,24 @@ def promotional_types(df):
     temp_data["type"] = (
         temp_data["type"].str.replace(r"\bTournament Entry\b", "Tournament", case=False, regex=True))
 
+    temp_data = temp_data[
+        temp_data['email_type'].isin(['Welcome', 'Informational', 'System', 'Transactional', 'Promotional'])]
+
+    def fix_type(row):
+        message_type = row['email_type']
+        promo_type = row['type']
+
+        # Rule 1: Promotional message but type says No Promo → Branding
+        if message_type == "Promotional" and promo_type == "No Promo":
+            return "Branding"
+        if message_type in ['Welcome', 'Informational', 'System', 'Transactional'] and promo_type == "No Promo":
+            return "System Message"
+
+        # Rule 2: For all other message types → keep original
+        return promo_type
+
+    temp_data['type'] = temp_data.apply(fix_type, axis=1)
+
     # Pivot: Competitor vs. Promotion Type, with counts
     promo_heatmap_data = (
         temp_data.pivot_table(
@@ -987,6 +1067,10 @@ def promotional_types(df):
     # Normalize to row-wise % (per competitor)
     promo_heatmap_data = promo_heatmap_data.div(promo_heatmap_data.sum(axis=1), axis=0) * 100
     promo_heatmap_data = promo_heatmap_data.round(1)
+
+    # --- NEW STEP: Order columns by total population (descending) ---
+    column_popularity = promo_heatmap_data.sum(axis=0).sort_values(ascending=False)
+    promo_heatmap_data = promo_heatmap_data[column_popularity.index]
 
     # Prepare data for Plotly
     z = promo_heatmap_data.values
@@ -1037,6 +1121,10 @@ def tonality_types(df):
     tone_heatmap_data = tone_heatmap_data.div(tone_heatmap_data.sum(axis=1), axis=0) * 100
     tone_heatmap_data = tone_heatmap_data.round(1)
 
+    # --- NEW STEP: Order columns by total population (descending) ---
+    column_popularity = tone_heatmap_data.sum(axis=0).sort_values(ascending=False)
+    tone_heatmap_data = tone_heatmap_data[column_popularity.index]
+
     # Step 4: Prepare data for Plotly
     z = tone_heatmap_data.values
     x = tone_heatmap_data.columns.tolist()  # Tone of Voice types
@@ -1065,26 +1153,88 @@ def tonality_types(df):
     return fig
 
 
+# Function to generate N distinct colors (HSL evenly spaced)
+def generate_colors(n):
+    colors = []
+    golden_ratio = 0.618033988749895
+    hue = 0.0
+
+    for i in range(n):
+        hue = (hue + golden_ratio) % 1.0
+        lightness = 0.5
+        saturation = 0.7
+        r, g, b = colorsys.hls_to_rgb(hue, lightness, saturation)
+        colors.append('#{:02x}{:02x}{:02x}'.format(int(r * 255), int(g * 255), int(b * 255)))
+
+    return colors
+
+
 def communication_timeline(df):
     # Filter & structure journey data
     temp_df = df.copy()
     # temp_df = temp_df.drop_duplicates(subset='tracking_hit_id')
 
-    journey_df = temp_df[['competitor_name', 'created_at', 'subject', 'type']].copy()
+    # Build journey_df including tracking_created_at
+    journey_df = temp_df[
+        ['competitor_name', 'created_at', 'subject', 'promotion_type', 'email_type', 'type', 'tracking_start_at']
+    ].copy()
+    print(journey_df['email_type'].unique())
+
+    # Convert to datetime
     journey_df['created_at'] = pd.to_datetime(journey_df['created_at'])
-    journey_df = journey_df.sort_values(by='created_at')
+
+    # Day offset per competitor
+    journey_df['day_offset'] = (
+            journey_df['created_at'].dt.normalize() -
+            journey_df.groupby('competitor_name')['created_at'].transform(lambda x: x.min().normalize())
+    ).dt.days
+
+    # No negative values (just in case)
+    journey_df['day_offset'] = journey_df['day_offset']
+
+    # Optional: sort
+    journey_df = journey_df.sort_values(by=['competitor_name', 'day_offset'])
+
+    # "Day X" labels
+    journey_df['day_index'] = "Day " + journey_df['day_offset'].astype(str)
 
     # Optional: fill missing type labels
     journey_df['type'] = journey_df['type'].fillna("No Promo")
 
+    # journey_df = journey_df[journey_df['email_type'].isin(['Welcome', 'Informational', 'System', 'Transactional', 'Promotional'])]
+
+    def fix_type(row):
+        message_type = row['email_type']
+        promo_type = row['type']
+
+        # Rule 1: Promotional message but type says No Promo → Branding
+        if message_type == "Promotional" and promo_type == "No Promo":
+            return "Branding"
+        if message_type in ['Welcome', 'Informational', 'System', 'Transactional'] and promo_type == "No Promo":
+            return "System Message"
+
+        # Rule 2: For all other message types → keep original
+        return promo_type
+
+    journey_df['type'] = journey_df.apply(fix_type, axis=1)
+    print(journey_df['type'].unique())
+
+    # Get unique competitor names
+    promo_types = journey_df["type"].unique()
+    num_types = len(promo_types)
+
+    palette = pc.qualitative.Light24
+    color_map = {comp: palette[i % len(palette)] for i, comp in enumerate(promo_types)}
+
     # Create timeline scatter plot
     fig = px.scatter(
         journey_df,
-        x="created_at",
+        x="day_offset",
         y="competitor_name",
         color="type",
         hover_data=["subject"],
         title="Email Communication Timeline by Competitor",
+        color_discrete_map=color_map
     )
 
     # Style
@@ -1092,7 +1242,7 @@ def communication_timeline(df):
     fig.update_layout(
         height=800,
         width=1500,
-        xaxis_title="Date Sent",
+        xaxis_title="Relative Day of Sending",
         yaxis_title="Competitor",
         legend_title="Promotion Type",
         margin=dict(t=60, l=60, r=40, b=60)
@@ -1187,7 +1337,7 @@ def emoji_analysis(df):
 
     fig.update_layout(
         title='Emoji Usage in Email Subjects and Content by Competitor',
-        height=400 + 30 * len(summary_df)
+        height=400 + 30 * len(summary_df),
     )
 
     return fig
@@ -1197,37 +1347,48 @@ def bonus_top_offers_stacked_without_no_promo(df: pd.DataFrame, top_n: int = 30)
     d = _prepare_offer_cols(df)
     d["promotion_type"] = d["type"]
 
-    # Aggregate
+    # Remove No Promo rows BEFORE grouping
+    d = d[~d["type"].isin(["No Promo", "No Promo - No Values"])]
+
+    # Aggregate: how many times each competitor uses each offer
     agg = (
-        d.groupby(["type", "offer_label", "competitor_name"])
+        d.groupby(["competitor_name", "offer_label"])
         .size()
         .reset_index(name="count")
     )
 
-    # Larrie's request - Remove No Promo
-    agg = agg[~agg['type'].isin(["No Promo"])]
-    agg = agg[~agg['type'].isin(["No Promo - No Values"])]
-
-    totals = agg.groupby(["type", "offer_label"])["count"].sum().reset_index(name="total")
-    top_offers = totals.sort_values("total", ascending=False).head(top_n)
-
-    agg = agg.merge(top_offers[["type", "offer_label"]], on=["type", "offer_label"])
-    agg = agg.merge(totals, on=["type", "offer_label"])
-
-    # Ordering
-    order = (
-        agg.groupby(["type", "offer_label"])["total"]
-        .max()
+    # --- Compute stats per offer_label ---
+    offer_stats = (
+        agg.groupby("offer_label")
+        .agg(
+            n_competitors=("competitor_name", "nunique"),
+            total=("count", "sum"),
+        )
         .reset_index()
-        .sort_values(["type", "total"], ascending=[True, False])
-    )
-    agg["offer_label"] = pd.Categorical(
-        agg["offer_label"], categories=order["offer_label"].tolist(), ordered=True
+        .sort_values(
+            ["total", "n_competitors"],  # 👈 first by total, then by competitors
+            ascending=[False, False]
+        )
     )
 
-    # --- Create unique color map for competitors ---
+    # Keep only top_n offers globally
+    top_offers = offer_stats.head(top_n)
+    top_labels = top_offers["offer_label"].tolist()
+
+    agg["offer_label"] = pd.Categorical(
+        agg["offer_label"],
+        categories=top_labels,
+        ordered=True
+    )
+
+    # --- Colors per competitor ---
     competitors = agg["competitor_name"].unique().tolist()
-    palette = pc.qualitative.Plotly + pc.qualitative.Pastel + pc.qualitative.Set2 + pc.qualitative.Set3
+    palette = (
+            pc.qualitative.Plotly
+            + pc.qualitative.Pastel
+            + pc.qualitative.Set2
+            + pc.qualitative.Set3
+    )
     color_map = {comp: palette[i % len(palette)] for i, comp in enumerate(competitors)}
 
     # Plot
@@ -1237,26 +1398,35 @@ def bonus_top_offers_stacked_without_no_promo(df: pd.DataFrame, top_n: int = 30)
         x="count",
         color="competitor_name",
         orientation="h",
-        text="count",  # show counts
-        title=f"Top {top_n} Offers by Frequency (Stacked by Competitor, grouped by Promotion)",
-        labels={"offer_label": "Offer", "count": "Instances", "competitor_name": "Competitor"},
+        text="count",
+        title=f"Top {top_n} Offers by Competitor Coverage & Frequency",
+        labels={
+            "offer_label": "Offer",
+            "count": "Instances",
+            "competitor_name": "Competitor"
+        },
         color_discrete_map=color_map
     )
 
-    # Style text as vertical
     bar_height = max(500, top_n * 30)
     fig.update_traces(
         textposition="inside",
         insidetextanchor="middle",
-        textangle=0  # 👈 rotate text vertically
+        textangle=0
     )
     fig.update_layout(
         barmode="stack",
-        yaxis={"categoryorder": "array", "categoryarray": order["offer_label"].tolist()},
+        yaxis={
+            "categoryorder": "array",
+            # reverse so the most common offer is shown at the TOP
+            "categoryarray": top_labels[::-1]
+        },
         height=bar_height,
-        uniformtext_minsize=8,
-        uniformtext_mode="hide"
+        uniformtext_minsize=12,
+        #uniformtext_mode="hide"
     )
+
+    print(offer_stats)
 
     return fig
 
@@ -1320,6 +1490,50 @@ def bonus_top_offers_stacked(df: pd.DataFrame, top_n: int = 30):
         height=bar_height,
         uniformtext_minsize=8,
         uniformtext_mode="hide"
+    )
+
+    return fig
+
+
+def play_value(df):
+    promo_df = df[['competitor_name', 'promotion_type', 'value', 'play_value']].copy()
+
+    summary = (
+        promo_df
+        .groupby(['competitor_name', 'promotion_type', 'value'])['play_value'].agg(pd.Series.mode)
+        .reset_index()
+        .sort_values(['competitor_name', 'promotion_type', 'value'])
+    )
+    summary = summary[summary['promotion_type'] == 'Free Spins']
+    summary = summary[~summary['play_value'] == ""]
+    summary = summary[summary['play_value'].notna()]
+
+    # --- Build Figure ---
+    fig = go.Figure(
+        data=[
+            go.Table(
+                header=dict(
+                    values=list(summary.columns),
+                    fill_color="lightgray",
+                    align="left",
+                    font=dict(size=14, color="black"),
+                    height=30
+                ),
+                cells=dict(
+                    values=[summary[col] for col in summary.columns],
+                    fill_color=[["white"] * (len(summary) - 1)],  # gray for total
+                    align="left",
+                    font=dict(size=12),
+                    height=25
+                )
+            )
+        ]
+    )
+
+    fig.update_layout(
+        title="Offer Value",
+        margin=dict(l=20, r=20, t=40, b=20),
+        height=800
     )
 
     return fig
@@ -1736,9 +1950,9 @@ def heatmap_by_day_hour_with_legend(df):
     # --- clean & prep ---
     d = (
         df.drop_duplicates(subset="tracking_hit_id")
-          .assign(local_created_at=pd.to_datetime(df["local_created_at"], errors="coerce"))
-          .dropna(subset=["local_created_at"])
-          .copy()
+        .assign(local_created_at=pd.to_datetime(df["local_created_at"], errors="coerce"))
+        .dropna(subset=["local_created_at"])
+        .copy()
     )
     d["hour"] = d["local_created_at"].dt.hour
     d["day_of_week"] = d["local_created_at"].dt.day_name()
@@ -1750,8 +1964,8 @@ def heatmap_by_day_hour_with_legend(df):
     def build_matrix(df_filt):
         base = (
             df_filt.groupby(["day_of_week", "hour"])
-                   .size()
-                   .unstack(fill_value=0)
+            .size()
+            .unstack(fill_value=0)
         )
         base = base.reindex(index=weekday_order, columns=hours, fill_value=0)
         return base
@@ -1769,8 +1983,8 @@ def heatmap_by_day_hour_with_legend(df):
     fig = go.Figure(
         data=[go.Heatmap(
             z=matrices["All"].values,
-            x=matrices["All"].columns,   # 0–23
-            y=matrices["All"].index,     # Mon–Sun
+            x=matrices["All"].columns,  # 0–23
+            y=matrices["All"].index,  # Mon–Sun
             colorscale="RdYlGn_r",
             zmin=0,
             showscale=True,
@@ -1807,8 +2021,8 @@ def heatmap_by_day_hour_with_legend(df):
     fig.update_layout(
         updatemenus=[dict(
             type="buttons",
-            direction="down",      # vertical list
-            x=0.0, y=0.5,         # left side, centered vertically
+            direction="down",  # vertical list
+            x=0.0, y=0.5,  # left side, centered vertically
             xanchor="left", yanchor="middle",
             buttons=buttons,
             bgcolor="rgba(240,240,240,0.9)",
@@ -1817,6 +2031,360 @@ def heatmap_by_day_hour_with_legend(df):
             pad=dict(r=6, t=6, b=6, l=6),
             font=dict(size=12)
         )]
+    )
+
+    return fig
+
+
+def seasonal_start_timeline(df):
+    df, first_mentions, activity = preprocess_holiday_data(df)
+
+    fig = px.scatter(
+        first_mentions,
+        x="first_mention_date",
+        y="competitor",
+        color="holiday_type",
+        hover_data=["first_subject", "first_offer", "first_requirements"],
+        title="Seasonal Start Timeline per Competitor",
+        height=600,
+        color_discrete_map={
+            "Black Friday": "#000000",  # Black
+            "Christmas": "#FF0000"  # Red
+        }
+    )
+
+    fig.update_traces(marker=dict(size=12))
+    fig.update_layout(yaxis=dict(categoryorder="array", categoryarray=sorted(first_mentions["competitor"].unique())))
+
+    return fig
+
+
+def seasonal_activity_barchart(df):
+    df, first_mentions, activity = preprocess_holiday_data(df)
+
+    # Manual color mapping
+    color_map = {
+        "Black Friday": "#000000",  # Black
+        "Christmas": "#FF0000"  # Red
+    }
+
+    fig = go.Figure()
+
+    for holiday in activity.columns:
+        fig.add_trace(go.Bar(
+            x=activity.index,
+            y=activity[holiday],
+            name=holiday,
+            marker_color=color_map.get(holiday, "#888888")  # fallback grey
+        ))
+
+    fig.update_layout(
+        barmode="group",
+        title="Seasonal Activity per Competitor",
+        xaxis_title="Competitor",
+        yaxis_title="Number of Seasonal Emails",
+        height=600
+    )
+
+    return fig
+
+
+def holiday_offer_heatmap(df):
+    df, first_mentions, activity = preprocess_holiday_data(df)
+
+    fig = px.imshow(
+        activity,
+        labels=dict(x="Holiday", y="Competitor", color="Count"),
+        x=activity.columns,
+        y=activity.index,
+        color_continuous_scale="RdBu",
+        title="Seasonal Offer Intensity Heatmap"
+    )
+
+    fig.update_layout(height=700)
+
+    return fig
+
+
+def holiday_promos_table_fig(df, competitor=None):
+    holiday_table = competitor_holiday_promos_table(df)
+
+    data = holiday_table.copy()
+
+    if competitor is not None:
+        data = data[data["competitor_name"] == competitor]
+
+    # Ensure string formatting
+    data = data.assign(
+        date=data["date"].dt.strftime("%d-%B-%Y"),
+        wager=data["wager"].fillna(""),
+        requirements=data["requirements"].fillna(""),
+        offer=data["offer"].fillna("")
+    )
+
+    fig = go.Figure(
+        data=[
+            go.Table(
+                header=dict(
+                    values=[
+                        "Competitor",
+                        "Holiday",
+                        "Date",
+                        "Subject",
+                        "Offer",
+                        "Wager",
+                        "Requirements",
+                    ],
+                    fill_color="#222222",
+                    font=dict(color="white", size=12),
+                    align="left",
+                ),
+                cells=dict(
+                    values=[
+                        data["competitor_name"],
+                        data["holiday"],
+                        data["date"],
+                        data["subject"],
+                        data["offer"],
+                        data["wager"],
+                        data["requirements"],
+                    ],
+                    align="left",
+                    font=dict(size=11),
+                    height=24,
+                ),
+            )
+        ]
+    )
+    fig.update_layout(
+        title="Holiday Promotions per Competitor",
+        height=1000
+    )
+
+    return fig
+
+
+def holiday_communication_timeline(df):
+    temp_df = df.copy()
+
+    def get_marker_emoji(row):
+        if row["holiday"] == "Christmas":
+            return "🎄"
+        if row["holiday"] == "Black Friday":
+            return "🖤"  # or "🛍️" or "💸"
+        return ""  # normal dot for non-holiday
+
+    # --- Build base journey_df (same idea as your communication_timeline) ---
+    journey_df = temp_df[
+        [
+            'competitor_name',
+            'created_at',
+            'subject',
+            'promotion_type',
+            'email_type',
+            'type',
+            'tracking_start_at',
+            'holiday',  # existing column
+            'translated_content'  # used only to upgrade holiday if needed
+        ]
+    ].copy()
+
+    # Datetime
+    journey_df['created_at'] = pd.to_datetime(journey_df['created_at'], errors='coerce')
+
+    # --- Relative day offset per competitor ---
+    journey_df['day_offset'] = (
+            journey_df['created_at'].dt.normalize()
+            - journey_df.groupby('competitor_name')['created_at'].transform(lambda x: x.min().normalize())
+    ).dt.days
+
+    # Sort
+    journey_df = journey_df.sort_values(by=['competitor_name', 'day_offset'])
+
+    # Optional label
+    journey_df['day_index'] = "Day " + journey_df['day_offset'].astype(str)
+
+    # --- Fix type vs email_type (same logic as your original) ---
+    journey_df['type'] = journey_df['type'].fillna("No Promo")
+
+    def fix_type(row):
+        message_type = row['email_type']
+        promo_type = row['type']
+
+        if message_type == "Promotional" and promo_type == "No Promo":
+            return "Branding"
+        if message_type in ['Welcome', 'Informational', 'System', 'Transactional'] and promo_type == "No Promo":
+            return "System Message"
+        return promo_type
+
+    journey_df['type'] = journey_df.apply(fix_type, axis=1)
+
+    # ======================================================================
+    #           U P G R A D E   /   N O R M A L I Z E   H O L I D A Y
+    # ======================================================================
+
+    # Work on a copy of the existing holiday column
+    # (we will write back into journey_df['holiday'])
+    h = journey_df['holiday'].astype(str).str.strip()
+
+    # Normalize obvious values
+    # --- SAFE normalize holiday column (handles float/NaN correctly) ---
+    def normalize_holiday(row_h, subject, translated):
+        # Convert only real strings, otherwise empty
+        base = row_h if isinstance(row_h, str) else ""
+
+        text = (str(subject) + " " + str(translated)).lower()
+
+        # If holiday column already has a value → normalize/upgrade it
+        if base:
+            low = base.lower()
+            if "black" in low and ("friday" in low or "week" in low):
+                return "Black Friday"
+            if "christmas" in low or "advent" in low or "holiday season" in low:
+                return "Christmas"
+            return base  # keep other labels (Anniversary, Weekend, etc.)
+
+        # If holiday empty, upgrade from text patterns
+        if any(k in text for k in ["black friday", "blackfriday", "cyber monday", "thanksgiving"]):
+            return "Black Friday"
+        if any(k in text for k in ["christmas", "xmas"]):
+            return "Christmas"
+
+        return ""  # no holiday detected
+
+    journey_df["holiday"] = journey_df.apply(
+        lambda r: normalize_holiday(r.get("holiday"), r.get("subject"), r.get("translated_content")),
+        axis=1
+    )
+
+    # ======================================================================
+    #                C O L O R   L A B E L   ( H O L I D A Y )
+    # ======================================================================
+
+    def color_label(row):
+        if row['holiday'] == 'Christmas':
+            return 'Christmas'
+        if row['holiday'] == 'Black Friday':
+            return 'Black Friday'
+        # Non-holiday → color by message/promo type
+        return row['type']
+
+    journey_df['color_label'] = journey_df.apply(color_label, axis=1)
+    journey_df["emoji"] = journey_df.apply(get_marker_emoji, axis=1)
+
+    # Build color map: Black Friday = black, Christmas = red, others from palette
+    unique_labels = journey_df['color_label'].unique().tolist()
+    palette = pc.qualitative.Light24
+    color_map = {
+        'Black Friday': '#000000',  # black
+        'Christmas': '#FF0000'  # red
+    }
+
+    idx = 0
+    for label in unique_labels:
+        if label in color_map:
+            continue
+        color_map[label] = palette[idx % len(palette)]
+        idx += 1
+
+    # ======================================================================
+    #                         P L O T   T I M E L I N E
+    # ======================================================================
+
+    fig = px.scatter(
+        journey_df,
+        x="created_at",
+        y="competitor_name",
+        color="color_label",
+        hover_data=["subject", "type", "holiday"],
+        title="Email Communication Timeline by Competitor (Holidays Highlighted)",
+        color_discrete_map=color_map
+    )
+
+    fig.update_traces(marker=dict(size=12, opacity=0.7))
+    fig.update_layout(
+        height=800,
+        width=1500,
+        xaxis_title="Relative Day of Sending",
+        yaxis_title="Competitor",
+        legend_title="Type / Holiday",
+        margin=dict(t=60, l=60, r=40, b=60),
+    )
+
+    # Apply emoji as text markers per trace
+    for i, trace in enumerate(fig.data):
+        mask = (journey_df["color_label"] == trace.name)
+
+        fig.data[i].mode = "text+markers"
+        fig.data[i].text = journey_df.loc[mask, "emoji"]
+        fig.data[i].textposition = "middle center"
+        fig.data[i].textfont = dict(size=25)
+    return fig
+
+
+def demo_channel_overview(df):
+    # Replace this with your real data
+    # -----------------------------
+    data = {
+        "competitor": ["CasinoMax", "JackpotCity", "SlotsOfVegas", "Stake", "VegasCasinoOnline"],
+        "email": [120, 80, 140, 200, 95],
+        "sms": [30, 50, 20, 10, 55],
+        "calls": [5, 2, 1, 8, 4]
+    }
+
+    df = pd.DataFrame(data)
+
+    # Calculate totals and percentages
+    df["total"] = df[["email", "sms", "calls"]].sum(axis=1)
+    df["email_pct"] = df["email"] / df["total"] * 100
+    df["sms_pct"] = df["sms"] / df["total"] * 100
+    df["calls_pct"] = df["calls"] / df["total"] * 100
+
+    # -----------------------------
+    # Build figure
+    # -----------------------------
+    fig = go.Figure()
+
+    # Email
+    fig.add_trace(go.Bar(
+        y=df["competitor"],
+        x=df["email_pct"],
+        name="Email",
+        orientation="h",
+        hovertemplate="<b>%{y}</b><br>Email: %{customdata} communications<extra></extra>",
+        customdata=df["email"]
+    ))
+
+    # SMS
+    fig.add_trace(go.Bar(
+        y=df["competitor"],
+        x=df["sms_pct"],
+        name="SMS",
+        orientation="h",
+        hovertemplate="<b>%{y}</b><br>SMS: %{customdata} communications<extra></extra>",
+        customdata=df["sms"]
+    ))
+
+    # Calls
+    fig.add_trace(go.Bar(
+        y=df["competitor"],
+        x=df["calls_pct"],
+        name="Calls",
+        orientation="h",
+        hovertemplate="<b>%{y}</b><br>Calls: %{customdata} communications<extra></extra>",
+        customdata=df["calls"]
+    ))
+
+    # Layout
+    fig.update_layout(
+        barmode="stack",
+        title="Communication Type Distribution by Competitor (Percentage)",
+        xaxis_title="Percentage of Communications",
+        yaxis_title="Competitor",
+        xaxis=dict(ticksuffix="%"),
+        height=450,
+        legend_title="Communication Type",
+        template="plotly_white"
     )
 
     return fig

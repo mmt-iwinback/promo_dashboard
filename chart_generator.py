@@ -8,7 +8,9 @@ from charts import competitor_volume, frequnecy_finder, cross_tabulation_by_comp
     bonus_treemap_promotions, bundles_pairwise_heatmap, bundle_size_distribution, bundles_top_bar, bundles_treemap, \
     competitor_table, ip_analysis, plot_ips_vs_high_volume, number_of_email_first_48h, email_types_first_48h, \
     promoion_types_first_48h, show_calendar_by_competitor, build_esp_provider_heatmap, \
-    build_esp_provider_table_from_providers, heatmap_by_day_hour_with_legend
+    build_esp_provider_table_from_providers, heatmap_by_day_hour_with_legend, play_value, \
+seasonal_start_timeline, seasonal_activity_barchart, holiday_offer_heatmap, holiday_promos_table_fig, holiday_communication_timeline, \
+    demo_channel_overview
 
 
 def generate_all_charts(df):
@@ -37,7 +39,7 @@ def generate_all_charts(df):
     print("Heatmap")
     charts["Heatmap"], heatmap_data = heatmap_and_opportunity(df)
     print("Heatmap 2")
-    charts["New Heatmap"] = heatmap_by_day_hour_with_legend(df)
+    # charts["New Heatmap"] = heatmap_by_day_hour_with_legend(df)
 
     # --- Chart 6: Opportunities ---
     print("Opportunities")
@@ -75,11 +77,12 @@ def generate_all_charts(df):
     print("IP Analysis")
     charts["Total IPs vs High Volume IPs Analysis"], summary1 = plot_ips_vs_high_volume(df)
 
+    # === ESP Analysis ===
     print("ESP Providers Analysis")
     charts["ESP Providers Analysis"], df_providers = build_esp_provider_heatmap(df)
 
     print("ESP Providers Table")
-    charts["ESP Providers Table"] = build_esp_provider_table_from_providers(df_providers)
+    #charts["ESP Providers Table"] = build_esp_provider_table_from_providers(df_providers)
 
     # --- Chart 9: Average Subject Length Analysis ---
     print("Average Subject Length Analysis")
@@ -116,6 +119,9 @@ def generate_all_charts(df):
     print("Offers by Frequency")
     charts["Offers by Frequency"] = bonus_treemap_promotions(df)
 
+    print("Play Value of Promotional Offers")
+    # charts["Play Value of Promotional Offers"] = play_value(df)
+
     # === Bundles Heatmap (new) ===
     print("Bundle Size Distribution")
     charts["Bundle Size Distribution"] = bundle_size_distribution(df)
@@ -126,11 +132,33 @@ def generate_all_charts(df):
 
     # === Bundles Treemap (new) ===
     print("Bundles Treemap")
-    charts["Bundles Treemap"] = bundles_treemap(df)
+    # charts["Bundles Treemap"] = bundles_treemap(df)
 
     # === Bundles Treemap (new) ===
     print("Bundles Treemap")
-    charts["Bundles Top Bar"] = bundles_top_bar(df)
+    # harts["Bundles Top Bar"] = bundles_top_bar(df)
+
+    # === Seasonal Offers ===
+    print("SEASONAL START TIMELINE FUNCTION")
+    # charts["Seasonal Start Timeline"] = seasonal_start_timeline(df)
+
+    print("SEASONAL ACTIVITY BAR CHART FUNCTION")
+    # charts["Seasonal Activity Bar Chart"] = seasonal_activity_barchart(df)
+
+    print("Holiday Offers Heatmap")
+    # charts["Holiday Offers Heatmap"] = holiday_offer_heatmap(df)
+
+    print("Holiday Offers")
+    # charts["Holiday Offers Table"] = holiday_promos_table_fig(df)
+
+    print("holiday_communication_timeline")
+    # charts["Holiday Communication Timeline"] = holiday_communication_timeline(df)
+
+    print("Demo Channel Overview")
+    charts["Demo Channel Overview"] = demo_channel_overview(df)
+
+
+
 
 
     # --- Chart 1: Promotion Types Bar Chart ---

@@ -71,6 +71,49 @@ if uploaded_file:
             if isinstance(date_range, tuple) and len(date_range) == 2:
                 df = df[(df['local_created_at'].dt.date >= date_range[0]) & (df['local_created_at'].dt.date <= date_range[1])]
 
+        if 'created_at' in df.columns:
+            number = st.sidebar.number_input("Insert a number of days")
+            days = int(number)
+
+        if 'created_at' in df.columns:
+            df['created_at'] = pd.to_datetime(df['created_at'])
+            df['tracking_start_at'] = pd.to_datetime(df['tracking_start_at'])
+            selected_period = st.sidebar.multiselect("Select Period",
+                                                       options=[f"First {days} days", f"Last {days} days"])
+            if selected_period == [f"First {days} days"]:
+                print('First 30 days')
+                tracking_start_lookup = df.groupby('tracking_id')['local_created_at'].min().rename('min_tracking_start_at')
+
+                # Merge the new column without affecting original created_at
+                df = df.merge(tracking_start_lookup, on='tracking_id', how='left')
+
+                # Calculate the days since tracking start
+                df['days_since'] = (df['local_created_at'] - df['min_tracking_start_at']).dt.days
+                # df['hours_since'] = (df['created_at'] - df['tracking_start_at_y']).dt.seconds / 3600
+
+                # Calculate first 'days since creation' up to the specified period
+                # df['within_period'] = df['days_since'] <= (days)
+                df = df[df['days_since'] <= (days-1)]
+
+            elif selected_period == [f"Last {days} days"]:
+                print(f'Last {days} days')
+
+                # Get the most recent communication per tracking_id and competitor_name for the specified lifecycle
+                latest_communication = df.groupby('tracking_id')['created_at'].max().rename('last_communication')
+
+                # Merge the latest communication date back into the dataframe
+                df = df.merge(latest_communication, on='tracking_id', how='left')
+
+                # Calculate the days since the last communication per tracking_id
+                df['days_since'] = (df['last_communication'] - df['created_at']).dt.days
+
+                # Calculate last 'days since the last communication'
+                df['within_period'] = df['days_since'] < days
+                df = df[df['days_since'] < days]
+
+            df = df.rename(columns={"tracking_start_at_x": "tracking_start_at"})
+
+
 
         # --- Generate charts ---
         charts = generate_all_charts(df)
@@ -98,15 +141,15 @@ if uploaded_file:
                 else:
                     st.plotly_chart(fig,
                                     use_container_width=True,
-                                    config={"toImageButtonOptions": {"format": "png", "filename": name, "scale": 2}}
+                                    config={"toImageButtonOptions": {"format": "png", "filename": name, "scale": 1}}
                     )
-                    # img_bytes = fig.to_image(format="png")
-                    # st.download_button(
-                    #     label=f"Download '{name}' as PNG",
-                    #     data=img_bytes,
-                    #     file_name=f"{name}.png",
-                    #     mime="image/png"
-                    # )
+                    img_bytes = fig.to_image(format="png")
+                    st.download_button(
+                        label=f"Download '{name}' as PNG",
+                        data=img_bytes,
+                        file_name=f"{name}.png",
+                        mime="image/png"
+                    )
 
                 # --- Auto AI observation for each chart ---
                 # with st.spinner("Generating AI insight..."):
