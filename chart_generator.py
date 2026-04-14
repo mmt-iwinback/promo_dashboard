@@ -10,7 +10,7 @@ from charts import competitor_volume, frequnecy_finder, cross_tabulation_by_comp
     promoion_types_first_48h, show_calendar_by_competitor, build_esp_provider_heatmap, \
     build_esp_provider_table_from_providers, heatmap_by_day_hour_with_legend, play_value, \
 seasonal_start_timeline, seasonal_activity_barchart, holiday_offer_heatmap, holiday_promos_table_fig, holiday_communication_timeline, \
-    demo_channel_overview
+    demo_channel_overview, plot_violin_chart
 
 
 def generate_all_charts(df):
@@ -34,6 +34,9 @@ def generate_all_charts(df):
     # --- Chart 4: Cross-Tabulation ---
     print("Cross-Tabulation")
     charts["Cross-Tabulation"] = cross_tabulation_by_competitor_lifecycle_channel(df)
+
+    print("Violin Chart")
+    charts["Violin Chart"] = plot_violin_chart(df)
 
     # --- Chart 5: Heatmap and Opportunities ---
     print("Heatmap")

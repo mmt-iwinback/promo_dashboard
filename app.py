@@ -47,10 +47,10 @@ if uploaded_file:
             if selected_promos:
                 df = df[df['promotion_types'].isin(selected_promos)]
 
-        if 'channel_type' in df.columns:
-            selected_channels = st.sidebar.multiselect("Select Channel Types", options=df['channel_type'].dropna().unique())
+        if 'channel' in df.columns:
+            selected_channels = st.sidebar.multiselect("Select Channels", options=df['channel'].dropna().unique())
             if selected_channels:
-                df = df[df['channel_type'].isin(selected_channels)]
+                df = df[df['channel'].isin(selected_channels)]
 
         if 'country' in df.columns:
             selected_countries = st.sidebar.multiselect("Select Country",

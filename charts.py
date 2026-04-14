@@ -75,15 +75,21 @@ def competitor_volume(df):
     print(df.columns)
     competitor_counts = df['competitor_name'].value_counts().reset_index()
     competitor_counts.columns = ['competitor_name', 'count']
+    competitors = df['competitor_name'].unique()
+
+    palette = pc.qualitative.Plotly + pc.qualitative.Pastel + pc.qualitative.Set2 + pc.qualitative.Set3
+    color_map = {comp: palette[i % len(palette)] for i, comp in enumerate(competitors)}
+
     fig = px.bar(competitor_counts, x='competitor_name', y='count', color='competitor_name',
                  title='Number of Hits per Competitor',
+                 color_discrete_map=color_map
                  )
     fig.update_layout(
         xaxis_title='Competitor Name',
         yaxis_title='Count',
         plot_bgcolor='white',
         template='plotly',
-        coloraxis=dict(colorscale="Viridis")
+        # coloraxis=dict(colorscale="Viridis")
     )
 
     return fig
@@ -112,12 +118,18 @@ def find_velocity(df, days: int):
         .reset_index()
     )
 
+    grouped["min_date"] = pd.to_datetime(grouped["min_date"], errors="coerce")
+    grouped["max_date"] = pd.to_datetime(grouped["max_date"], errors="coerce")
+
+    grouped['max_date_date'] = grouped['max_date'].dt.date
+    grouped['min_date_date'] = grouped['min_date'].dt.date
+
     grouped["min_date_str"] = grouped["min_date"].dt.strftime("%d-%b-%Y")
     grouped["max_date_str"] = grouped["max_date"].dt.strftime("%d-%b-%Y")
-    grouped["active_period"] = (grouped["max_date"] - grouped["min_date"]).dt.days + 1
-    grouped["weekly_velocity"] = (grouped["volume"] * 7 / max(days, 1)).round(2)
-    #grouped["weekly_velocity"] = (grouped["volume"] * 7 / grouped["active_period"].replace(0, 1)).round(2)
 
+    grouped["active_period"] = (grouped["max_date_date"] - grouped["min_date_date"]).apply(lambda x: x.days) + 1
+    grouped["weekly_velocity"] = (grouped["volume"] * 7 / max(days, 1)).round(2)
+    # grouped["weekly_velocity"] = (grouped["volume"] * 7 / grouped["active_period"].replace(0, 1)).round(2)
 
     final_df = (
         grouped[[
@@ -480,6 +492,7 @@ def plot_calendar_heatmap(data, year):
 
 
 def show_calendar(df, year=2025):
+    print("HERE")
     temp_df = df.copy()
     temp_df = temp_df.drop_duplicates(subset='tracking_hit_id')
     temp_df['created_at'] = pd.to_datetime(temp_df['created_at'])
@@ -582,7 +595,7 @@ def plot_calendar_bars_by_competitor(data, year, annotate="total"):
         available_months = sorted(data['month'].unique())
 
     n_months = len(available_months)
-    ncols = 3  # fewer columns → bigger cells
+    ncols = 4  # fewer columns → bigger cells
     nrows = int(np.ceil(n_months / ncols))
 
     # 🔹 enlarge figure
@@ -667,8 +680,8 @@ def plot_calendar_bars_by_competitor(data, year, annotate="total"):
         fig.legend(
             handles=legend_handles,
             loc='lower center',
-            ncol=min(2, len(legend_handles)),
-            bbox_to_anchor=(0.5, -0.001)
+            ncol=min(3, len(legend_handles)),
+            bbox_to_anchor=(0.5, -0.01)
         )
 
     plt.tight_layout()
@@ -2386,5 +2399,129 @@ def demo_channel_overview(df):
         legend_title="Communication Type",
         template="plotly_white"
     )
+
+    return fig
+
+def process_top_times_by_brand(df_2):
+        # df_2 = pd.DataFrame(data=df, columns=['competitor_name', 'tracking_id', 'local_created_at'])
+        t = pd.to_datetime(df_2['local_created_at'], errors="coerce")
+
+        df_2['time'] = pd.to_datetime(
+            '1970-01-01'
+        ) + pd.to_timedelta(
+            t.dt.hour * 3600 + t.dt.minute * 60 + t.dt.second,
+            unit='s'
+        )
+
+        brand_counts = df_2['competitor_name'].value_counts().reset_index()
+        brand_counts.columns = ['competitor_name', 'instance_count']
+        df_2 = df_2.merge(brand_counts, on='competitor_name', how='left')
+        df_2 = df_2.sort_values(by='instance_count', ascending=False)
+
+        export_mean_median_timestamps = pd.DataFrame(columns=['Median Time', 'Mean Time'])
+        groupby_df = df_2.groupby(['tracking_id', 'competitor_name', 'instance_count'])
+        export_mean_median_timestamps['Median Time'] = groupby_df['time'].median().apply(
+            lambda x: x.floor(freq='s').time())
+        export_mean_median_timestamps['Mean Time'] = groupby_df['time'].mean().apply(lambda x: x.floor(freq='s').time())
+        export_mean_median_timestamps.sort_values(by='instance_count', ascending=False, inplace=True)
+        export_mean_median_timestamps = export_mean_median_timestamps.reset_index()
+
+        df_2.drop(['instance_count'], axis=1, inplace=True)
+        export_mean_median_timestamps.drop(['instance_count'], axis=1, inplace=True)
+
+        df_2['time'] = [x.floor(freq='s').time() for x in df_2['time']]
+        return df_2[['competitor_name', 'tracking_id', 'time']], export_mean_median_timestamps
+
+def plot_violin_chart(data):
+    """
+    Violin chart for message times by brand (website_url),
+    with Start Date annotations above each violin.
+
+    Notes:
+    - Uses numeric y (minutes since midnight) for correct violin rendering.
+    - Displays y tick labels as HH:MM.
+    - Adds start dates via layout.annotations (not scatter traces).
+    """
+
+    # 1) Build dataset in the same way as your other charts: service -> df
+    brand_time_df, meta = process_top_times_by_brand(data)
+    # meta could include start dates if you already have them there; keep for future use.
+
+    df = brand_time_df.copy()
+
+    # 2) Ensure required columns exist
+    required_cols = {"competitor_name", "time"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+
+    # 3) Parse time robustly and convert to numeric minutes for plotting
+    #    (Plotly violins need numeric y for proper distributions)
+    t = pd.to_datetime(df["time"].astype(str), format="%H:%M:%S", errors="coerce")
+    df = df.loc[~t.isna()].copy()
+    df["time_minutes"] = t.dt.hour * 60 + t.dt.minute + (t.dt.second / 60.0)
+
+    # 4) Determine ordering (consistent, dashboard-friendly)
+    #    Option A: order by number of observations (most active first)
+    website_order = (
+        df["competitor_name"]
+        .value_counts()
+        .index
+        .tolist()
+    )
+
+    # 5) Build labels (stable and readable)
+    website_mapping = {w: f"{i+1}. {w}" for i, w in enumerate(website_order)}
+    df["label"] = df["competitor_name"].map(website_mapping)
+
+    # 6) Start dates: ideally these should come from data or meta.
+    #    If you only have a list, map it in the same order as website_order.
+    #    IMPORTANT: ensure start_dates length >= number of websites selected.
+    start_dates = [
+        "12-12-2024", "01-09-2024", "04-11-2024", "05-20-2024", "12-03-2024",
+        "10-10-2024", "09-06-2024", "01-21-2024", "09-17-2024", "05-14-2024"
+    ]
+
+    start_date_mapping = {}
+    for idx, w in enumerate(website_order):
+        # Fallback to empty string if not provided
+        start_date_mapping[website_mapping[w]] = start_dates[idx] if idx < len(start_dates) else ""
+
+    # 7) Create violin plot (structured similarly to typical dashboard charts)
+    # Create a violin plot
+    fig = px.violin(data_frame=brand_time_df,
+                    x='competitor_name',
+                    y=brand_time_df['time'].astype(str),  # Convert time to string for proper rendering
+                    color='competitor_name',
+                    points="all",
+                    box=True,
+                    color_discrete_sequence=px.colors.qualitative.Vivid,
+                    labels={'x': 'Brand', 'time': 'Time', 'website_url': 'Brand', 'competitor_name': 'Competitor'},
+                    hover_data=['competitor_name'])
+
+    fig.update_yaxes(categoryorder='array', categoryarray=sorted(brand_time_df['time'].astype(str).unique()))
+    fig.update_traces(opacity=1)
+
+    # Update layout
+    fig.update_layout(
+        legend_traceorder='normal',
+        xaxis_title='Competitor',
+        yaxis_title='Time',
+        margin=dict(t=50, b=150),
+    )
+
+    # Add start date annotations above each violin
+    #annotations = []
+    #for i, label in enumerate(start_date_mapping.keys()):
+    #    annotations.append(go.Scatter(
+    #        x=[label],
+    #        y=[max(brand_time_df['time'])],  # Position text at the max time value
+    #        text=[f"Start: {start_date_mapping[label]}"],
+    #        mode="text",
+    #        showlegend=False
+    #    ))
+#
+    #for annotation in annotations:
+    #    fig.add_trace(annotation)
 
     return fig

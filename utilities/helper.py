@@ -147,10 +147,13 @@ def preprocess_holiday_data(df):
                 "first_offer": first_row.get("offer_text", ""),
                 "first_wager": first_row.get("play_value", ""),
                 "first_requirements": first_row.get("deposit_requirement", ""),
-                "total_holiday_comms": hdf["tracking_hit_id"].nunique(),
+                #"total_holiday_comms": hdf["tracking_hit_id"].nunique(),
             })
 
     first_mentions = pd.DataFrame(records)
+
+    print("1")
+    print(first_mentions)
 
     # -------- SEASONAL ACTIVITY MATRIX (for bar chart + heatmap) ----------
     activity = (
@@ -164,6 +167,7 @@ def preprocess_holiday_data(df):
         .sort_index()
     )
 
+    print("2")
 
     return df, first_mentions, activity
 
